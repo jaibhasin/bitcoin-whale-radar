@@ -56,17 +56,38 @@ def get_btc_price():
 def get_historical_volume():
     """Get historical Bitcoin transaction volume data"""
     try:
-        # First try blockchain.info API
-        url = "https://api.blockchain.info/charts/estimated-transaction-volume-usd?timespan=2years&format=json&cors=true"
+        # First try CoinGecko API which tends to be reliable
+        url = (
+            "https://api.coingecko.com/api/v3/coins/bitcoin/"
+            "market_chart?vs_currency=usd&days=730&interval=daily"
+        )
         response = requests.get(url, timeout=10)
-        
+
         if response.status_code == 200:
             data = response.json()
-            logger.info("Historical volume data fetched successfully")
-            return data.get('values', [])
-        
-        # Fallback to sample data if API fails
-        logger.warning(f"Historical Volume API Error: Status code {response.status_code}, using fallback data")
+            logger.info("Historical volume data fetched from CoinGecko")
+            volumes = data.get("total_volumes", [])
+            return [
+                {"x": int(point[0] / 1000), "y": point[1]}
+                for point in volumes
+            ]
+
+        # If CoinGecko fails, try the old blockchain.info endpoint
+        logger.warning(
+            f"CoinGecko API Error: Status code {response.status_code}, trying blockchain.info"
+        )
+        url = (
+            "https://api.blockchain.info/charts/estimated-transaction-volume-usd?timespan=2years&format=json&cors=true"
+        )
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            logger.info("Historical volume data fetched from blockchain.info")
+            return data.get("values", [])
+
+        logger.warning(
+            f"Historical Volume API Error: Status code {response.status_code}, using fallback data"
+        )
         return generate_sample_volume_data()
     except Exception as e:
         logger.error(f"Error fetching historical volume data: {e}")
@@ -117,29 +138,40 @@ def get_rich_list():
     try:
         # List of known whale addresses with estimated balances
         known_whales = [
-            {"address": "34xp4vRoCGJym3xR7yCVPFHoCNxv4Twseo", "balance": 252597, "type": "Binance Cold Wallet"},
-            {"address": "bc1qgdjqv0av3q56jvd82tkdjpy7gdp9ut8tlqmgrpmv24sq4nw842ns4vw0eh", "balance": 168010, "type": "Bitfinex Cold Wallet"},
-            {"address": "1P5ZEDWTKTFGxQjZphgWPQUpe554WKDfHQ", "balance": 143305, "type": "Huobi Cold Wallet"},
-            {"address": "3LQUu4v9z6KNch71j7kbj8GPeAGUo1FW6a", "balance": 116928, "type": "Binance Hot Wallet"},
-            {"address": "bc1qa5wkgaew2dkv56kfvj49j0av5nml45x9ek9hz6", "balance": 94643, "type": "Unknown Whale"},
-            {"address": "1LQoWist8KkaUXSPKZHNvEyfrEkPHzSsCd", "balance": 84321, "type": "Huobi Cold Wallet 2"},
-            {"address": "3Kzh9qAqVWQhEsfQz7zEQL1EuSx5tyNLNS", "balance": 73456, "type": "OKX Cold Wallet"},
-            {"address": "1NDyJtNTjmwk5xPNhjgAMu4HDHigtobu1s", "balance": 68752, "type": "Binance Cold Wallet 2"},
-            {"address": "bc1qf2epzuxpm32t4g02m9ya5mzh2lj8kufmzqtxd4", "balance": 56789, "type": "Unknown Whale"},
-            {"address": "bc1qd9uscgm8ea0xpgdrm4wuudryuya6rd4yd6h9qn", "balance": 52341, "type": "Unknown Whale"},
-            {"address": "bc1qmxjefnuy06v345v6vhwpwt05dztztmx4g3y7wp", "balance": 48765, "type": "Unknown Whale"},
-            {"address": "bc1q7yjjq5arunvhkkv9880nz6kqrc653q9xk0x0yd", "balance": 45678, "type": "Unknown Whale"},
-            {"address": "38UmuUqPCrFmQo4khkomQwZ4VbY2nZMJ67", "balance": 42123, "type": "Kraken"},
-            {"address": "1FeexV6bAHb8ybZjqQMjJrcCrHGW9sb6uF", "balance": 40123, "type": "Unknown Whale"}
+            {"address": "34xp4vRoCGJym3xR7yCVPFHoCNxv4Twseo", "type": "Binance Cold Wallet"},
+            {"address": "bc1qgdjqv0av3q56jvd82tkdjpy7gdp9ut8tlqmgrpmv24sq4nw842ns4vw0eh", "type": "Bitfinex Cold Wallet"},
+            {"address": "1P5ZEDWTKTFGxQjZphgWPQUpe554WKDfHQ", "type": "Huobi Cold Wallet"},
+            {"address": "3LQUu4v9z6KNch71j7kbj8GPeAGUo1FW6a", "type": "Binance Hot Wallet"},
+            {"address": "bc1qa5wkgaew2dkv56kfvj49j0av5nml45x9ek9hz6", "type": "Unknown Whale"},
+            {"address": "1LQoWist8KkaUXSPKZHNvEyfrEkPHzSsCd", "type": "Huobi Cold Wallet 2"},
+            {"address": "3Kzh9qAqVWQhEsfQz7zEQL1EuSx5tyNLNS", "type": "OKX Cold Wallet"},
+            {"address": "1NDyJtNTjmwk5xPNhjgAMu4HDHigtobu1s", "type": "Binance Cold Wallet 2"},
+            {"address": "bc1qf2epzuxpm32t4g02m9ya5mzh2lj8kufmzqtxd4", "type": "Unknown Whale"},
+            {"address": "bc1qd9uscgm8ea0xpgdrm4wuudryuya6rd4yd6h9qn", "type": "Unknown Whale"},
+            {"address": "bc1qmxjefnuy06v345v6vhwpwt05dztztmx4g3y7wp", "type": "Unknown Whale"},
+            {"address": "bc1q7yjjq5arunvhkkv9880nz6kqrc653q9xk0x0yd", "type": "Unknown Whale"},
+            {"address": "38UmuUqPCrFmQo4khkomQwZ4VbY2nZMJ67", "type": "Kraken"},
+            {"address": "1FeexV6bAHb8ybZjqQMjJrcCrHGW9sb6uF", "type": "Unknown Whale"}
         ]
+
+        def fetch_balance(address):
+            """Fetch BTC balance for a given address"""
+            try:
+                url = f"https://blockchain.info/rawaddr/{address}?limit=0"
+                response = requests.get(url, timeout=10)
+                if response.status_code == 200:
+                    data = response.json()
+                    return data.get("final_balance", 0) / 100000000
+            except Exception as exc:
+                logger.error(f"Error fetching balance for {address}: {exc}")
+            return 0.0
         
         rich_list = []
         current_price = get_btc_price()
         
-        # Use fallback data directly since the API is unreliable
-        logger.info("Using predefined wallet data for rich list")
+        logger.info("Fetching wallet balances for rich list")
         for whale in known_whales:
-            balance_btc = whale["balance"]
+            balance_btc = fetch_balance(whale["address"])
             rich_list.append({
                 'address': whale["address"],
                 'balance_btc': format_number(balance_btc, 'regular'),
