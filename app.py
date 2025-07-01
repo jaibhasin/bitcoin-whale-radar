@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import time
 import cachetools.func
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Configure logging
 logging.basicConfig(
@@ -13,6 +14,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+
+# Reuse a single HTTP session for all requests to improve performance
+session = requests.Session()
+session.headers.update({"User-Agent": "CryptoWhaleRadar/1.0"})
 
 def format_number(number, format_type='regular'):
     """Format numbers for display"""
@@ -39,7 +44,7 @@ def format_number(number, format_type='regular'):
 def get_btc_price():
     """Get current Bitcoin price in USD"""
     try:
-        response = requests.get('https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT', timeout=5)
+        response = session.get('https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT', timeout=5)
         if response.status_code == 200:
             data = response.json()
             logger.info(f"BTC Price fetched successfully")
@@ -55,38 +60,48 @@ def get_btc_price():
 def get_historical_volume():
     """Get historical Bitcoin transaction volume data"""
     try:
-        # First try CoinGecko API which tends to be reliable
-        url = (
-            "https://api.coingecko.com/api/v3/coins/bitcoin/"
-            "market_chart?vs_currency=usd&days=730&interval=daily"
-        )
-        response = requests.get(url, timeout=10)
+        def fetch_coingecko():
+            url = (
+                "https://api.coingecko.com/api/v3/coins/bitcoin/"
+                "market_chart?vs_currency=usd&days=730&interval=daily"
+            )
+            r = session.get(url, timeout=10)
+            if r.status_code == 200:
+                data = r.json()
+                volumes = data.get("total_volumes", [])
+                return [
+                    {"x": int(point[0] / 1000), "y": point[1]}
+                    for point in volumes
+                ]
+            logger.warning(
+                f"CoinGecko API Error: Status code {r.status_code}"
+            )
+            return None
 
-        if response.status_code == 200:
-            data = response.json()
-            logger.info("Historical volume data fetched from CoinGecko")
-            volumes = data.get("total_volumes", [])
-            return [
-                {"x": int(point[0] / 1000), "y": point[1]}
-                for point in volumes
+        def fetch_blockchain():
+            url = (
+                "https://api.blockchain.info/charts/estimated-transaction-volume-usd?timespan=2years&format=json&cors=true"
+            )
+            r = session.get(url, timeout=10)
+            if r.status_code == 200:
+                data = r.json()
+                return data.get("values", [])
+            logger.warning(
+                f"Blockchain.info API Error: Status code {r.status_code}"
+            )
+            return None
+
+        with ThreadPoolExecutor() as executor:
+            futures = [
+                executor.submit(fetch_coingecko),
+                executor.submit(fetch_blockchain),
             ]
+            for future in as_completed(futures):
+                result = future.result()
+                if result:
+                    logger.info("Historical volume data fetched successfully")
+                    return result
 
-        # If CoinGecko fails, try the old blockchain.info endpoint
-        logger.warning(
-            f"CoinGecko API Error: Status code {response.status_code}, trying blockchain.info"
-        )
-        url = (
-            "https://api.blockchain.info/charts/estimated-transaction-volume-usd?timespan=2years&format=json&cors=true"
-        )
-        response = requests.get(url, timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            logger.info("Historical volume data fetched from blockchain.info")
-            return data.get("values", [])
-
-        logger.error(
-            f"Historical Volume API Error: Status code {response.status_code}"
-        )
     except Exception as e:
         logger.error(f"Error fetching historical volume data: {e}")
     return []
@@ -98,7 +113,7 @@ def get_rich_list():
     """Get top 10 richest Bitcoin addresses"""
     try:
         url = "https://api.blockchair.com/bitcoin/addresses?limit=10&s=balance(desc)"
-        response = requests.get(url, timeout=10)
+        response = session.get(url, timeout=10)
         if response.status_code == 200:
             data = response.json().get("data", [])
             rich_list = []
@@ -139,6 +154,7 @@ def get_wallet_label(address):
     }
     return labels.get(address, "Unknown Wallet")
 
+@cachetools.func.ttl_cache(ttl=60)
 def get_large_transactions():
     """Get data for large Bitcoin transactions in the last 24 hours"""
     try:
@@ -157,7 +173,7 @@ def get_large_transactions():
         try:
             # Get recent blocks from the last 24 hours
             url = f"https://blockchain.info/blocks/{twenty_four_hours_ago}000?format=json"
-            response = requests.get(url, timeout=5)
+            response = session.get(url, timeout=5)
             
             if response.status_code == 200:
                 blocks = response.json()
@@ -165,7 +181,7 @@ def get_large_transactions():
                 # Process each block to find large transactions
                 for block in blocks[:5]:  # Limit to 5 blocks to avoid too many requests
                     block_url = f"https://blockchain.info/rawblock/{block['hash']}"
-                    block_response = requests.get(block_url, timeout=5)
+                    block_response = session.get(block_url, timeout=5)
                     
                     if block_response.status_code == 200:
                         block_data = block_response.json()
@@ -205,7 +221,7 @@ def get_large_transactions():
         if not data['transactions']:
             try:
                 url = "https://blockchain.info/unconfirmed-transactions?format=json"
-                response = requests.get(url, timeout=5)
+                response = session.get(url, timeout=5)
                 
                 if response.status_code == 200:
                     tx_data = response.json()
