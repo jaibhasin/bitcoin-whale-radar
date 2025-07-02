@@ -58,50 +58,19 @@ def get_btc_price():
 # Cache historical volume data for 1 hour
 @cachetools.func.ttl_cache(ttl=3600)
 def get_historical_volume():
-    """Get historical Bitcoin transaction volume data"""
+    """Return Bitcoin transaction volume in USD for the last two years."""
     try:
-        def fetch_coingecko():
-            url = (
-                "https://api.coingecko.com/api/v3/coins/bitcoin/"
-                "market_chart?vs_currency=usd&days=730&interval=daily"
-            )
-            r = session.get(url, timeout=10)
-            if r.status_code == 200:
-                data = r.json()
-                volumes = data.get("total_volumes", [])
-                return [
-                    {"x": int(point[0] / 1000), "y": point[1]}
-                    for point in volumes
-                ]
-            logger.warning(
-                f"CoinGecko API Error: Status code {r.status_code}"
-            )
-            return None
-
-        def fetch_blockchain():
-            url = (
-                "https://api.blockchain.info/charts/estimated-transaction-volume-usd?timespan=2years&format=json&cors=true"
-            )
-            r = session.get(url, timeout=10)
-            if r.status_code == 200:
-                data = r.json()
-                return data.get("values", [])
-            logger.warning(
-                f"Blockchain.info API Error: Status code {r.status_code}"
-            )
-            return None
-
-        with ThreadPoolExecutor() as executor:
-            futures = [
-                executor.submit(fetch_coingecko),
-                executor.submit(fetch_blockchain),
-            ]
-            for future in as_completed(futures):
-                result = future.result()
-                if result:
-                    logger.info("Historical volume data fetched successfully")
-                    return result
-
+        url = (
+            "https://api.blockchain.info/charts/estimated-transaction-volume-usd"
+            "?timespan=2years&format=json&cors=true"
+        )
+        r = session.get(url, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            values = data.get("values", [])
+            logger.info("Historical volume data fetched successfully")
+            return values
+        logger.error(f"Blockchain.info API Error: Status code {r.status_code}")
     except Exception as e:
         logger.error(f"Error fetching historical volume data: {e}")
     return []
@@ -167,7 +136,6 @@ def get_large_transactions():
             "current_btc_price": format_number(current_price, 'price'),
             "transactions": [],
             "rich_list": get_rich_list(),
-            "historical_volume": get_historical_volume()
         }
         
         try:
@@ -258,7 +226,6 @@ def get_large_transactions():
             "current_btc_price": format_number(get_btc_price(), 'price'),
             "transactions": [],
             "rich_list": get_rich_list(),
-            "historical_volume": get_historical_volume()
         }
 
 @app.route('/')
@@ -270,6 +237,11 @@ def index():
 def get_data():
     """API endpoint to get Bitcoin data"""
     return jsonify(get_large_transactions())
+
+@app.route('/api/volume')
+def api_volume():
+    """API endpoint to get historical volume data only"""
+    return jsonify(get_historical_volume())
 
 if __name__ == '__main__':
     app.run(debug=True)

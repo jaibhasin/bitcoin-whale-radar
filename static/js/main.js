@@ -19,6 +19,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Initial data fetch
     fetchData();
+    fetchVolumeData();
 
     // Set up auto-refresh every 2 minutes
     setInterval(fetchData, 120000);
@@ -48,8 +49,6 @@ async function fetchData() {
         // Update Bitcoin stats
         updateBitcoinStats();
         
-        // Update transaction volume chart
-        updateVolumeChart(data.historical_volume);
         
         // Update largest transactions
         updateTransactions(data.transactions);
@@ -64,6 +63,21 @@ async function fetchData() {
         document.getElementById('btc-price').textContent = 'Error loading price';
     } finally {
         isLoading = false;
+    }
+}
+
+/**
+ * Fetch only the historical volume data from the API
+ */
+async function fetchVolumeData() {
+    try {
+        const response = await fetch('/api/volume');
+        if (!response.ok) throw new Error('Failed to fetch volume data');
+        const data = await response.json();
+        updateVolumeChart(data);
+    } catch (error) {
+        console.error('Failed to fetch volume data:', error);
+        showError('volumeChart', 'chart-loading', 'Failed to load chart data');
     }
 }
 
